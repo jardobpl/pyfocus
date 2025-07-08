@@ -29,7 +29,7 @@ DEFAULT_SETTINGS = {
     "status_indicator_enabled": True,
     "obstacle_sound_enabled": True,
     "theme": "light",
-    "last_backup_prompt_date": "" # New setting for backup reminder
+    "last_backup_prompt_date": ""
 }
 
 # --- Theme Color Palettes ---
@@ -68,14 +68,15 @@ class FocusSessionApp:
         self.apply_theme()
         
         self.root.title("Focus")
-        self.root.minsize(420, 380)
-        self.root.geometry("420x380")
+        self.root.minsize(420, 500)
+        self.root.geometry("420x500")
 
         self.setup_logging()
 
         # --- Application State ---
         self.state = "IDLE"
         self.current_task = ""
+        self.session_start_time = None
         self.session_end_time = None
         self.obstacle_start_time = None
         self.time_left_in_session = timedelta(0)
@@ -86,16 +87,21 @@ class FocusSessionApp:
         self.status_frame = None
         self.status_time_label = None
         
+        ### ZMIANA: Inicjalizacja list na etykiety z gwiazdami ###
+        self.idle_star_labels = []
+        self.session_star_labels = []
+        
         self.quotes = []
         self.available_quotes = []
 
         # --- Run startup tasks ---
-        self._check_for_backup_reminder() # New backup check
+        self._check_for_backup_reminder()
         self.load_quotes()
         self.setup_ui()
         
         self.update_session_counts()
         self.update_streak_display()
+        self.update_stars_display()
         
         self.update_timer()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -121,7 +127,6 @@ class FocusSessionApp:
         self.style.theme_use('clam')
 
         self.style.configure('.', background=self.colors['bg'], foreground=self.colors['fg'], font=self.FONT_NORMAL)
-        # ... (rest of the theme configuration is unchanged)
         self.style.configure('TFrame', background=self.colors['bg'])
         self.style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['fg'], padding=5)
         self.style.configure('H1.TLabel', font=self.FONT_H1)
@@ -144,7 +149,6 @@ class FocusSessionApp:
 
 
     def setup_ui(self):
-        # This method remains unchanged
         main_frame = ttk.Frame(self.root, padding=(20, 15))
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
@@ -171,11 +175,27 @@ class FocusSessionApp:
         self.sessions_count_label = ttk.Label(info_frame, text="Completed Today: 0", font=self.FONT_NORMAL)
         self.sessions_count_label.grid(row=0, column=1, sticky='e')
 
+        ### ZMIANA: Stworzenie ramki i 5 etykiet dla gwiazd na ekranie głównym ###
+        idle_stars_frame = ttk.Frame(info_frame)
+        idle_stars_frame.grid(row=1, column=0, columnspan=2, pady=(5,0))
+        for _ in range(5):
+            lbl = ttk.Label(idle_stars_frame, text="☆", font=self.FONT_H2)
+            lbl.pack(side=tk.LEFT, padx=1)
+            self.idle_star_labels.append(lbl)
+
         self.session_frame = ttk.Frame(main_frame)
         self.session_frame.columnconfigure(0, weight=1)
         
         self.task_label = ttk.Label(self.session_frame, text="", wraplength=380, justify='center', style='H2.TLabel')
         self.task_label.pack(pady=5)
+        
+        ### ZMIANA: Stworzenie ramki i 5 etykiet dla gwiazd na ekranie sesji ###
+        session_stars_frame = ttk.Frame(self.session_frame)
+        session_stars_frame.pack(pady=(0, 5))
+        for _ in range(5):
+            lbl = ttk.Label(session_stars_frame, text="☆", font=self.FONT_H2)
+            lbl.pack(side=tk.LEFT, padx=1)
+            self.session_star_labels.append(lbl)
 
         self.timer_canvas = tk.Canvas(self.session_frame, width=220, height=220, bg=self.colors['bg'], highlightthickness=0)
         self.timer_canvas.pack(pady=10)
@@ -183,17 +203,27 @@ class FocusSessionApp:
         self.obstacle_label = ttk.Label(self.session_frame, text="", foreground=self.colors['warning'], font=self.FONT_NORMAL)
 
         self.quote_label = ttk.Label(self.session_frame, text="", wraplength=380, justify='center', style='Quote.TLabel')
-        self.quote_label.pack(side=tk.BOTTOM, pady=(0, 5))
+        self.quote_label.pack(side=tk.BOTTOM, pady=(10, 5))
         
         session_buttons_frame = ttk.Frame(self.session_frame)
-        session_buttons_frame.pack(fill=tk.X, pady=5, expand=False, side=tk.BOTTOM)
+        session_buttons_frame.pack(fill=tk.X, pady=10, expand=False, side=tk.BOTTOM)
+
         session_buttons_frame.columnconfigure(0, weight=1)
         session_buttons_frame.columnconfigure(1, weight=1)
+        session_buttons_frame.rowconfigure(0, weight=1)
+        session_buttons_frame.rowconfigure(1, weight=1)
 
         self.obstacle_button = ttk.Button(session_buttons_frame, text="⏸️ Obstacle", command=self.toggle_obstacle)
-        self.obstacle_button.grid(row=0, column=0, sticky="ew", padx=5)
+        self.obstacle_button.grid(row=0, column=0, sticky="ew", padx=5, pady=3)
+
         self.cancel_button = ttk.Button(session_buttons_frame, text="⏹️ Cancel", command=self.cancel_session, style='Error.TButton')
-        self.cancel_button.grid(row=0, column=1, sticky="ew", padx=5)
+        self.cancel_button.grid(row=0, column=1, sticky="ew", padx=5, pady=3)
+
+        self.plus_5m_button = ttk.Button(session_buttons_frame, text="+5 min", command=lambda: self.adjust_session_time(5))
+        self.plus_5m_button.grid(row=1, column=0, sticky="ew", padx=5, pady=3)
+        
+        self.plus_1m_button = ttk.Button(session_buttons_frame, text="+1 min", command=lambda: self.adjust_session_time(1))
+        self.plus_1m_button.grid(row=1, column=1, sticky="ew", padx=5, pady=3)
         
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
@@ -205,15 +235,12 @@ class FocusSessionApp:
         file_menu.add_command(label="Exit", command=self.on_closing)
         menubar.add_cascade(label="File", menu=file_menu)
 
-    # --- NEW METHODS FOR BACKUP REMINDER ---
-
     def _check_for_backup_reminder(self):
         """Checks if it's time to prompt the user for a backup."""
         today = date.today()
         last_prompt_str = self.settings.get("last_backup_prompt_date", "")
 
         if not last_prompt_str:
-            # First time running the feature, just set the date and continue.
             self.settings["last_backup_prompt_date"] = today.isoformat()
             self.save_settings()
             return
@@ -227,7 +254,6 @@ class FocusSessionApp:
                 self._show_backup_prompt(today)
         except (ValueError, TypeError) as e:
             self.logger.error(f"Could not parse last_backup_prompt_date: {e}")
-            # If the date is invalid, reset it.
             self.settings["last_backup_prompt_date"] = today.isoformat()
             self.save_settings()
 
@@ -240,7 +266,6 @@ class FocusSessionApp:
             "Press Cancel to be reminded later."
         )
         
-        # We need to lift the root window to make sure the messagebox is on top
         self.root.lift()
         user_choice_is_ok = messagebox.askokcancel(title, message)
 
@@ -249,7 +274,6 @@ class FocusSessionApp:
             self.settings["last_backup_prompt_date"] = today.isoformat()
             self.save_settings()
             messagebox.showinfo("Log Cleared", "The log file has been cleared. The headers have been preserved.")
-            # Refresh UI elements
             self.update_session_counts()
             self.update_streak_display()
 
@@ -261,16 +285,14 @@ class FocusSessionApp:
 
         try:
             with open(LOG_FILE, 'r+', encoding='utf-8') as f:
-                header = f.readline() # Read the first line (header)
-                f.seek(0)             # Go back to the start of the file
-                f.truncate()          # Clear the file content
-                f.write(header)       # Write the header back
+                header = f.readline()
+                f.seek(0)
+                f.truncate()
+                f.write(header)
             self.logger.info("Log file content has been cleared, header preserved.")
         except IOError as e:
             self.logger.error(f"Could not clear log file: {e}")
             messagebox.showerror("Error", f"Could not clear log file:\n{e}")
-
-    # --- (rest of the methods are unchanged) ---
     
     def switch_view(self):
         if self.state in ["SESSION_RUNNING", "OBSTACLE_ACTIVE"]:
@@ -290,7 +312,8 @@ class FocusSessionApp:
         self.current_task = task
         self.task_label.config(text=self.current_task)
         self.state = "SESSION_RUNNING"
-        self.session_end_time = datetime.now() + timedelta(minutes=self.settings["session_duration_minutes"])
+        self.session_start_time = datetime.now()
+        self.session_end_time = self.session_start_time + timedelta(minutes=self.settings["session_duration_minutes"])
         self.obstacle_count = 0
         self.total_obstacle_time = timedelta(0)
         if self.quotes:
@@ -300,7 +323,13 @@ class FocusSessionApp:
             self.available_quotes.remove(chosen_quote)
             self.quote_label.config(text=f"\"{chosen_quote}\"")
         self.switch_view()
-    
+
+    def adjust_session_time(self, minutes_to_add):
+        """Dodaje podaną liczbę minut do czasu zakończenia sesji."""
+        if self.state == "SESSION_RUNNING":
+            self.session_end_time += timedelta(minutes=minutes_to_add)
+            self.logger.info(f"Added {minutes_to_add} minutes. New end time: {self.session_end_time.strftime('%H:%M:%S')}")
+
     def cancel_session(self):
         if messagebox.askyesno("Cancel Session", "Are you sure you want to cancel the current session? Progress will not be saved."):
             self.state = "IDLE"
@@ -314,7 +343,7 @@ class FocusSessionApp:
             self.obstacle_start_time = datetime.now()
             self.obstacle_count += 1
             self.obstacle_button.config(text="▶️ Resume", style='Success.TButton')
-            self.obstacle_label.pack(pady=5)
+            self.obstacle_label.pack(pady=5, side=tk.BOTTOM)
         elif self.state == "OBSTACLE_ACTIVE":
             self.state = "SESSION_RUNNING"
             self.total_obstacle_time += datetime.now() - self.obstacle_start_time
@@ -329,18 +358,20 @@ class FocusSessionApp:
             time_left = self.session_end_time - datetime.now()
             if time_left.total_seconds() <= 0:
                 self.complete_session()
-                return
-            total_duration = self.settings["session_duration_minutes"] * 60
-            progress = time_left.total_seconds() / total_duration if total_duration > 0 else 0
-            self.draw_progress_circle(progress, self._format_timedelta_hhmmss(time_left), self.colors['green_dark'])
-            display_time = time_left
-            display_color = self.colors['green_dark']
+            else:
+                total_duration = (self.session_end_time - self.session_start_time).total_seconds()
+                progress = time_left.total_seconds() / total_duration if total_duration > 0 else 0
+                self.draw_progress_circle(progress, self._format_timedelta_hhmmss(time_left), self.colors['green_dark'])
+                display_time = time_left
+                display_color = self.colors['green_dark']
+
         elif self.state == "OBSTACLE_ACTIVE":
             obstacle_time = datetime.now() - self.obstacle_start_time
             self.obstacle_label.config(text=f"Break duration: {self._format_timedelta_hhmmss(obstacle_time)}")
             self.draw_progress_circle(1, self._format_timedelta_hhmmss(self.time_left_in_session), self.colors['orange_dark'])
             display_time = self.time_left_in_session
             display_color = self.colors['orange_dark']
+
         self.update_status_indicator(display_time, display_color)
         self.root.after(1000, self.update_timer)
 
@@ -372,18 +403,25 @@ class FocusSessionApp:
         bt_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(main_frame, text="mbs (music without lyrics)", variable=mbs_var).pack(anchor="w", padx=20, pady=5)
         ttk.Checkbutton(main_frame, text="bt (without phone)", variable=bt_var).pack(anchor="w", padx=20, pady=5)
+        
         def on_save():
             self.log_session(mbs_checked=mbs_var.get(), bt_checked=bt_var.get())
             dialog.destroy()
-            self.finalize_session_completion()
+            
         ttk.Button(main_frame, text="Save and Continue", command=on_save, style='Success.TButton').pack(pady=15, ipady=5, fill=tk.X)
+        
         self.root.wait_window(dialog)
+        
+        self.finalize_session_completion()
 
     def finalize_session_completion(self):
         self.state = "IDLE"
         self.task_entry.delete(0, tk.END)
+        
         self.update_session_counts()
         self.update_streak_display()
+        self.update_stars_display()
+        
         self.switch_view()
 
     def log_session(self, mbs_checked, bt_checked):
@@ -427,7 +465,8 @@ class FocusSessionApp:
         streak = self._calculate_streak()
         self.streak_label.config(text=f"🔥 Streak: {streak} days")
 
-    def update_session_counts(self):
+    def _get_today_sessions_count(self):
+        """Zwraca liczbę sesji ukończonych dzisiaj."""
         count = 0
         today_str = datetime.now().strftime("%Y-%m-%d")
         if os.path.exists(LOG_FILE):
@@ -441,7 +480,34 @@ class FocusSessionApp:
                             count += 1
             except (IOError, StopIteration, ValueError, IndexError):
                 pass
+        return count
+
+    def update_session_counts(self):
+        """Aktualizuje etykietę z liczbą ukończonych dzisiaj sesji."""
+        count = self._get_today_sessions_count()
         self.sessions_count_label.config(text=f"Completed Today: {count}")
+
+    ### ZMIANA: Przebudowana funkcja do aktualizacji gwiazd ###
+    def update_stars_display(self):
+        """Aktualizuje 5 etykiet z gwiazdami, zmieniając ich tekst i kolor."""
+        count = self._get_today_sessions_count()
+        
+        all_labels = self.idle_star_labels + self.session_star_labels
+
+        for i in range(5):
+            # Ustalanie wyglądu dla i-tej gwiazdy
+            if i < count:
+                star_text = '⭐'
+                star_color = self.colors['warning']  # Żółty kolor dla zapełnionej gwiazdy
+            else:
+                star_text = '☆'
+                star_color = self.colors['fg']  # Domyślny kolor tekstu dla pustej gwiazdy
+
+            # Aktualizacja i-tej gwiazdy na obu ekranach
+            if len(self.idle_star_labels) > i:
+                self.idle_star_labels[i].config(text=star_text, foreground=star_color)
+            if len(self.session_star_labels) > i:
+                self.session_star_labels[i].config(text=star_text, foreground=star_color)
 
     def load_settings(self):
         if os.path.exists(CONFIG_FILE):
